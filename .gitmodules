@@ -1,0 +1,3 @@
+[submodule "edge-developer-kit-reference-scripts"]
+	path = edge-developer-kit-reference-scripts
+	url = https://github.com/haochuan1982/edge-developer-kit-reference-scripts
