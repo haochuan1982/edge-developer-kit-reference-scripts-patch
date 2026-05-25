@@ -1,0 +1,115 @@
+From 2dd6fbb1322bd132238231fd476b373916e9818c Mon Sep 17 00:00:00 2001
+From: "Martin, Chen" <haochuan.z.chen@intel.com>
+Date: Mon, 25 May 2026 09:08:09 +0800
+Subject: [PATCH 1/5] fix speech-to-text setup
+
+---
+ .../workers/speech-to-text/pyproject.toml     |  1 +
+ .../workers/speech-to-text/setup.sh           | 32 +++++++++++++++++++
+ .../workers/speech-to-text/start.sh           |  4 +++
+ .../workers/speech-to-text/utils.py           |  6 ++--
+ 4 files changed, 40 insertions(+), 3 deletions(-)
+
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/pyproject.toml b/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/pyproject.toml
+index 1c94d17..38716ac 100644
+--- a/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/pyproject.toml
++++ b/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/pyproject.toml
+@@ -16,4 +16,5 @@ dependencies = [
+     "uvicorn==0.32.1",
+     "protobuf==6.33.5",
+     "pillow>=12.1.1",
++    "huggingface-hub==0.36.2",
+ ]
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/setup.sh b/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/setup.sh
+index 145c8a6..83b9e97 100755
+--- a/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/setup.sh
++++ b/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/setup.sh
+@@ -9,6 +9,7 @@ WORKERS_DIR="$(dirname "$SCRIPT_DIR")"
+ WORKERS_THIRDPARTY_DIR="$WORKERS_DIR/thirdparty"
+ ROOT_DIR="$(dirname "$WORKERS_DIR")"
+ ROOT_THIRDPARTY_DIR="$ROOT_DIR/thirdparty"
++HOME_DIR="$(dirname "$WORKERS_DIR")"
+ 
+ UV_PATH="$WORKERS_THIRDPARTY_DIR/uv/uv"
+ FFMPEG_PATH="$ROOT_THIRDPARTY_DIR/ffmpeg/bin/ffmpeg"
+@@ -87,12 +88,43 @@ setup_optimum_venv() {
+     return 0
+ }
+ 
++prepare_model() {
++    local model_dir="$HOME_DIR/models/stt"
++
++    source $OPTIMUM_VENV_DIR/bin/activate
++
++    hf download openai/whisper-tiny
++    optimum-cli export openvino --model openai/whisper-tiny --weight-format fp32 --trust-remote-code "$model_dir/openai/whisper-tiny"
++    $OPTIMUM_VENV_DIR/bin/python thirdparty/$OPTIMUM_EXPORT_MODEL_SCRIPT speech2text --source_model openai/whisper-tiny --model_repository_path "$model_dir" --model_name openai/whisper-tiny --weight-format fp32 
++
++    deactivate
++
++    mkdir -p "$model_dir/intel/noise-suppression-poconetlike-0001/FP32"
++    curl https://storage.openvinotoolkit.org/repositories/open_model_zoo/temp/noise-suppression-poconetlike-0001/FP32/noise-suppression-poconetlike-0001.xml -o "$model_dir/intel/noise-suppression-poconetlike-0001/FP32/noise-suppression-poconetlike-0001.xml"
++    curl https://storage.openvinotoolkit.org/repositories/open_model_zoo/temp/noise-suppression-poconetlike-0001/FP32/noise-suppression-poconetlike-0001.bin -o "$model_dir/intel/noise-suppression-poconetlike-0001/FP32/noise-suppression-poconetlike-0001.bin"
++
++    return 0
++}
++
++install_runtime_dependencies() {
++    echo "Installing speech-to-text runtime dependencies..."
++
++    # Use uv sync to install dependencies from pyproject.toml
++    # This creates/updates the .venv and installs all dependencies
++    "$UV_PATH" sync
++
++    echo "Runtime dependencies installed."
++    return 0
++}
++
+ main() {
+     echo "Starting Speech-to-Text setup..."
+     cd "$SCRIPT_DIR"
+     check_uv
+     check_ffmpeg
+     setup_optimum_venv
++    prepare_model
++    install_runtime_dependencies
+     echo "Speech-to-Text setup completed successfully!"
+ }
+ 
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/start.sh b/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/start.sh
+index 965dc18..3028397 100755
+--- a/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/start.sh
++++ b/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/start.sh
+@@ -6,6 +6,10 @@ set -euo pipefail
+ 
+ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ UV_CMD="$SCRIPT_DIR/../thirdparty/uv/uv"
++FFMPEG_PATH="$SCRIPT_DIR/../../thirdparty/ffmpeg/bin/"
++
++# Add ffmpeg to PATH
++export PATH="$FFMPEG_PATH:$PATH"
+ 
+ cd "$SCRIPT_DIR"
+ exec "$UV_CMD" run main.py "$@"
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/utils.py b/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/utils.py
+index 5922008..7a535ff 100644
+--- a/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/utils.py
++++ b/usecases/ai/edge-ai-demo-studio/workers/speech-to-text/utils.py
+@@ -221,11 +221,11 @@ def validate_and_sanitize_model_id(model_id: str) -> str:
+ def _get_export_model_paths():
+     """Get paths to the export_model.py script and its venv Python."""
+     script_dir = os.path.dirname(os.path.abspath(__file__))
+-    thirdparty_dir = os.path.join(script_dir, "thirdparty")
++    #thirdparty_dir = os.path.join(script_dir, "thirdparty")
+     if os.name == "nt":
+-        python_path = os.path.join(thirdparty_dir, ".venv", "Scripts", "python.exe")
++        python_path = os.path.join(script_dir, ".venv", "Scripts", "python.exe")
+     else:
+-        python_path = os.path.join(thirdparty_dir, ".venv", "bin", "python")
++        python_path = os.path.join(script_dir, ".venv", "bin", "python")
+     export_script = os.path.join(thirdparty_dir, "export_model.py")
+     return python_path, export_script
+ 
+-- 
+2.43.0
+

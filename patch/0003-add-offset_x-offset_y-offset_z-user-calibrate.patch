@@ -1,0 +1,420 @@
+From 9389e47dac185de6a9773a2d383e5ed98ac4e9ec Mon Sep 17 00:00:00 2001
+From: Martin Chen <haochuan.z.chen@intel.com>
+Date: Wed, 20 May 2026 14:42:32 +0800
+Subject: [PATCH 3/5] add offset_x, offset_y, offset_z user calibrate
+
+---
+ .../frontend/src/samples/robotics-ai/demo.tsx | 108 ++++++++++++++++++
+ .../src/services/robotics-ai/hooks/index.ts   |  71 +++++++++++-
+ .../robotics-ai/hooks/use-offset-config.ts    |  65 +++++++++++
+ .../workers/robotics-ai/main.py               |  58 ++++++++++
+ 4 files changed, 301 insertions(+), 1 deletion(-)
+ create mode 100644 usecases/ai/edge-ai-demo-studio/frontend/src/services/robotics-ai/hooks/use-offset-config.ts
+
+diff --git a/usecases/ai/edge-ai-demo-studio/frontend/src/samples/robotics-ai/demo.tsx b/usecases/ai/edge-ai-demo-studio/frontend/src/samples/robotics-ai/demo.tsx
+index 8668784..e632b0e 100644
+--- a/usecases/ai/edge-ai-demo-studio/frontend/src/samples/robotics-ai/demo.tsx
++++ b/usecases/ai/edge-ai-demo-studio/frontend/src/samples/robotics-ai/demo.tsx
+@@ -122,6 +122,16 @@ export function RoboticsAiDemo({ sample: _sample }: { sample: Sample }) {
+     gripperConfigError,
+     gripperConfigMessage,
+     handleSaveGripperConfig,
++    offsetX,
++    offsetY,
++    offsetZ,
++    setOffsetX,
++    setOffsetY,
++    setOffsetZ,
++    isSavingOffsetConfig,
++    offsetConfigError,
++    offsetConfigMessage,
++    handleSaveOffsetConfig,
+     arucoDetectResult,
+     isArucoPolling,
+     setIsArucoPolling,
+@@ -517,6 +527,104 @@ export function RoboticsAiDemo({ sample: _sample }: { sample: Sample }) {
+ 
+                   <div className="border-border border-t" />
+ 
++                  {/* Offset config */}
++                  <div>
++                    <p className="text-foreground text-sm font-medium">
++                      Offset Configuration (mm)
++                    </p>
++                    <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
++                      Configure the X/Y/Z offsets to align the robot arm
++                      coordinate system with the camera coordinate system. Set
++                      all to 0 before running calibration.
++                    </p>
++                  </div>
++                  <div className="grid grid-cols-3 gap-3">
++                    <div>
++                      <label
++                        htmlFor="offset-x"
++                        className="text-foreground block text-xs font-medium"
++                      >
++                        Offset X
++                      </label>
++                      <input
++                        id="offset-x"
++                        type="number"
++                        step="0.1"
++                        value={offsetX}
++                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
++                          setOffsetX(Number(e.target.value))
++                        }
++                        className="border-input bg-background text-foreground mt-1 w-full rounded-lg border px-3 py-1.5 text-sm focus:ring-2 focus:outline-none"
++                      />
++                    </div>
++                    <div>
++                      <label
++                        htmlFor="offset-y"
++                        className="text-foreground block text-xs font-medium"
++                      >
++                        Offset Y
++                      </label>
++                      <input
++                        id="offset-y"
++                        type="number"
++                        step="0.1"
++                        value={offsetY}
++                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
++                          setOffsetY(Number(e.target.value))
++                        }
++                        className="border-input bg-background text-foreground mt-1 w-full rounded-lg border px-3 py-1.5 text-sm focus:ring-2 focus:outline-none"
++                      />
++                    </div>
++                    <div>
++                      <label
++                        htmlFor="offset-z"
++                        className="text-foreground block text-xs font-medium"
++                      >
++                        Offset Z
++                      </label>
++                      <input
++                        id="offset-z"
++                        type="number"
++                        step="0.1"
++                        value={offsetZ}
++                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
++                          setOffsetZ(Number(e.target.value))
++                        }
++                        className="border-input bg-background text-foreground mt-1 w-full rounded-lg border px-3 py-1.5 text-sm focus:ring-2 focus:outline-none"
++                      />
++                    </div>
++                  </div>
++                  <div className="flex flex-wrap items-center gap-2">
++                    <Button
++                      size="sm"
++                      variant="outline"
++                      disabled={isSavingOffsetConfig}
++                      onClick={async () => await handleSaveOffsetConfig()}
++                      className="gap-1.5"
++                    >
++                      {isSavingOffsetConfig ? (
++                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
++                      ) : (
++                        <CheckCircle2 className="h-3.5 w-3.5" />
++                      )}
++                      {isSavingOffsetConfig
++                        ? 'Saving…'
++                        : 'Save Offset Config'}
++                    </Button>
++                  </div>
++                  {offsetConfigMessage && !offsetConfigError && (
++                    <p className="text-xs text-green-600 dark:text-green-400">
++                      {offsetConfigMessage}
++                    </p>
++                  )}
++                  {offsetConfigError && (
++                    <p className="text-destructive text-xs">
++                      {offsetConfigError}
++                    </p>
++                  )}
++
++                  <div className="border-border border-t" />
++
+                   <div className="flex flex-wrap items-center gap-2">
+                     <Button
+                       size="sm"
+diff --git a/usecases/ai/edge-ai-demo-studio/frontend/src/services/robotics-ai/hooks/index.ts b/usecases/ai/edge-ai-demo-studio/frontend/src/services/robotics-ai/hooks/index.ts
+index 0114cb1..8814481 100644
+--- a/usecases/ai/edge-ai-demo-studio/frontend/src/services/robotics-ai/hooks/index.ts
++++ b/usecases/ai/edge-ai-demo-studio/frontend/src/services/robotics-ai/hooks/index.ts
+@@ -33,6 +33,10 @@ import {
+   useGripperConfigQuery,
+   useSetGripperConfigMutation,
+ } from './use-gripper-config'
++import {
++  useOffsetConfigQuery,
++  useSetOffsetConfigMutation,
++} from './use-offset-config'
+ import {
+   type ArucoDetectResult,
+   useArucoCalibrateMutation,
+@@ -217,6 +221,16 @@ export interface UseRoboticsAiDemoReturn {
+   gripperConfigError: string | null
+   gripperConfigMessage: string | null
+   handleSaveGripperConfig: () => Promise<void>
++  offsetX: number
++  offsetY: number
++  offsetZ: number
++  setOffsetX: (v: number) => void
++  setOffsetY: (v: number) => void
++  setOffsetZ: (v: number) => void
++  isSavingOffsetConfig: boolean
++  offsetConfigError: string | null
++  offsetConfigMessage: string | null
++  handleSaveOffsetConfig: () => Promise<void>
+   arucoDetectResult: ArucoDetectResult | null
+   isArucoPolling: boolean
+   setIsArucoPolling: (v: boolean) => void
+@@ -275,6 +289,15 @@ export function useRoboticsAiDemo(): UseRoboticsAiDemoReturn {
+   const [gripperConfigMessage, setGripperConfigMessage] = useState<
+     string | null
+   >(null)
++  const [offsetX, setOffsetX] = useState(0)
++  const [offsetY, setOffsetY] = useState(0)
++  const [offsetZ, setOffsetZ] = useState(0)
++  const [offsetConfigError, setOffsetConfigError] = useState<string | null>(
++    null,
++  )
++  const [offsetConfigMessage, setOffsetConfigMessage] = useState<
++    string | null
++  >(null)
+   const [isArucoPolling, setIsArucoPolling] = useState(false)
+   const [arucoError, setArucoError] = useState<string | null>(null)
+   const [arucoMessage, setArucoMessage] = useState<string | null>(null)
+@@ -316,6 +339,12 @@ export function useRoboticsAiDemo(): UseRoboticsAiDemoReturn {
+     mutateAsync: setGripperConfigMutateAsync,
+     isPending: isSavingGripperConfig,
+   } = useSetGripperConfigMutation()
++  const { data: offsetConfigData, refetch: refetchOffsetConfig } =
++    useOffsetConfigQuery(workerBaseUrl)
++  const {
++    mutateAsync: setOffsetConfigMutateAsync,
++    isPending: isSavingOffsetConfig,
++  } = useSetOffsetConfigMutation()
+   const { data: arucoDetectData } = useArucoDetectQuery(
+     workerBaseUrl,
+     isArucoPolling,
+@@ -448,6 +477,26 @@ export function useRoboticsAiDemo(): UseRoboticsAiDemoReturn {
+     }
+   }, [workerBaseUrl, gripperOpen, gripperClose, setGripperConfigMutateAsync])
+ 
++  const handleSaveOffsetConfig = useCallback(async () => {
++    setOffsetConfigError(null)
++    setOffsetConfigMessage(null)
++    try {
++      const result = await setOffsetConfigMutateAsync({
++        workerBaseUrl,
++        offsetX,
++        offsetY,
++        offsetZ,
++      })
++      setOffsetConfigMessage(result.message)
++    } catch (error) {
++      setOffsetConfigError(
++        error instanceof Error
++          ? error.message
++          : 'Failed to save offset configuration.',
++      )
++    }
++  }, [workerBaseUrl, offsetX, offsetY, offsetZ, setOffsetConfigMutateAsync])
++
+   const handleArucoCalibrate = useCallback(async () => {
+     setArucoError(null)
+     setArucoMessage(null)
+@@ -520,6 +569,8 @@ export function useRoboticsAiDemo(): UseRoboticsAiDemoReturn {
+       const result = await calibrationConfirmMutateAsync({ workerBaseUrl })
+       setCalibrationState('idle')
+       setCalibrationMessage(result.message)
++      // Refetch offset config to update UI with auto-calculated values
++      await refetchOffsetConfig()
+     } catch (error) {
+       setCalibrationState('idle')
+       setCalibrationError(
+@@ -528,7 +579,7 @@ export function useRoboticsAiDemo(): UseRoboticsAiDemoReturn {
+           : 'Failed to confirm calibration.',
+       )
+     }
+-  }, [workerBaseUrl, calibrationConfirmMutateAsync])
++  }, [workerBaseUrl, calibrationConfirmMutateAsync, refetchOffsetConfig])
+ 
+   const handleReset = useCallback(() => {
+     setChatMessages([])
+@@ -781,6 +832,14 @@ export function useRoboticsAiDemo(): UseRoboticsAiDemoReturn {
+     setGripperClose(gripperConfigData.gripper_close)
+   }, [gripperConfigData])
+ 
++  // Sync offset config from server on first load
++  useEffect(() => {
++    if (!offsetConfigData) return
++    setOffsetX(offsetConfigData.offset_x)
++    setOffsetY(offsetConfigData.offset_y)
++    setOffsetZ(offsetConfigData.offset_z)
++  }, [offsetConfigData])
++
+   // Sync motor calibration state from polling
+   useEffect(() => {
+     if (!motorCalibrationStatusData) return
+@@ -918,6 +977,16 @@ export function useRoboticsAiDemo(): UseRoboticsAiDemoReturn {
+     gripperConfigError,
+     gripperConfigMessage,
+     handleSaveGripperConfig,
++    offsetX,
++    offsetY,
++    offsetZ,
++    setOffsetX,
++    setOffsetY,
++    setOffsetZ,
++    isSavingOffsetConfig,
++    offsetConfigError,
++    offsetConfigMessage,
++    handleSaveOffsetConfig,
+     arucoDetectResult: arucoDetectData ?? null,
+     isArucoPolling,
+     setIsArucoPolling,
+diff --git a/usecases/ai/edge-ai-demo-studio/frontend/src/services/robotics-ai/hooks/use-offset-config.ts b/usecases/ai/edge-ai-demo-studio/frontend/src/services/robotics-ai/hooks/use-offset-config.ts
+new file mode 100644
+index 0000000..4ad8195
+--- /dev/null
++++ b/usecases/ai/edge-ai-demo-studio/frontend/src/services/robotics-ai/hooks/use-offset-config.ts
+@@ -0,0 +1,65 @@
++// Copyright (C) 2026 Intel Corporation
++// SPDX-License-Identifier: Apache-2.0
++
++import { useMutation, useQuery } from '@tanstack/react-query'
++
++export interface OffsetConfig {
++  offset_x: number
++  offset_y: number
++  offset_z: number
++}
++
++interface SetOffsetConfigResponse {
++  status: boolean
++  offset_x: number
++  offset_y: number
++  offset_z: number
++  message: string
++}
++
++export function useOffsetConfigQuery(workerBaseUrl: string) {
++  return useQuery({
++    queryKey: ['offset-config', workerBaseUrl],
++    queryFn: async (): Promise<OffsetConfig> => {
++      const response = await fetch(`${workerBaseUrl}/robot/offset-config`)
++      if (!response.ok) throw new Error(`Failed with status ${response.status}`)
++      return response.json()
++    },
++    retry: false,
++    staleTime: 0,
++  })
++}
++
++export function useSetOffsetConfigMutation() {
++  return useMutation({
++    mutationFn: async ({
++      workerBaseUrl,
++      offsetX,
++      offsetY,
++      offsetZ,
++    }: {
++      workerBaseUrl: string
++      offsetX: number
++      offsetY: number
++      offsetZ: number
++    }): Promise<SetOffsetConfigResponse> => {
++      const response = await fetch(`${workerBaseUrl}/robot/offset-config`, {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({
++          offset_x: offsetX,
++          offset_y: offsetY,
++          offset_z: offsetZ,
++        }),
++      })
++      if (!response.ok) {
++        const body = await response.json().catch(() => ({}))
++        throw new Error(
++          (body as { detail?: string }).detail ??
++            `Request failed with status ${response.status}`,
++        )
++      }
++      return response.json()
++    },
++  })
++}
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
+index 67a24d0..0618aad 100755
+--- a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
++++ b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
+@@ -1086,6 +1086,64 @@ async def set_gripper_config(body: dict):
+     }
+ 
+ 
++@app.get("/robot/offset-config")
++async def get_offset_config():
++    """Return the current offset_x, offset_y, offset_z from config."""
++    robot_cfg = CONFIG.get("robot", {})
++    return {
++        "offset_x": robot_cfg.get("offset_x", 0),
++        "offset_y": robot_cfg.get("offset_y", 0),
++        "offset_z": robot_cfg.get("offset_z", 0),
++    }
++
++
++@app.post("/robot/offset-config")
++async def set_offset_config(body: dict):
++    """Persist updated offset_x, offset_y, offset_z to config.yaml.
++
++    These offsets are used to align the robot arm coordinate system with the
++    camera coordinate system during object pickup operations.
++    """
++    global CONFIG
++
++    offset_x = body.get("offset_x")
++    offset_y = body.get("offset_y")
++    offset_z = body.get("offset_z")
++
++    if offset_x is None or offset_y is None or offset_z is None:
++        raise HTTPException(
++            status_code=400,
++            detail="All three offset values (offset_x, offset_y, offset_z) are required.",
++        )
++
++    try:
++        offset_x = float(offset_x)
++        offset_y = float(offset_y)
++        offset_z = float(offset_z)
++    except (TypeError, ValueError) as exc:
++        raise HTTPException(
++            status_code=400, detail="Offset values must be numbers."
++        ) from exc
++
++    CONFIG.setdefault("robot", {})["offset_x"] = offset_x
++    CONFIG["robot"]["offset_y"] = offset_y
++    CONFIG["robot"]["offset_z"] = offset_z
++
++    try:
++        await run_blocking(save_config, "config.yaml", CONFIG)
++    except Exception as exc:
++        logger.exception("Failed to save offset config")
++        raise HTTPException(status_code=500, detail=str(exc))
++
++    return {
++        "status": True,
++        "offset_x": offset_x,
++        "offset_y": offset_y,
++        "offset_z": offset_z,
++        "message": "Offset configuration saved successfully.",
++    }
++
++
+ # ── ArUco camera calibration ──────────────────────────────────────
+ 
+ ARUCO_ALIGN_TOLERANCE_PX = 15
+-- 
+2.43.0
+

@@ -1,0 +1,95 @@
+From beb41df7962a7ff88117d0ad6faa595c434fb051 Mon Sep 17 00:00:00 2001
+From: "Martin, Chen" <haochuan.z.chen@intel.com>
+Date: Fri, 22 May 2026 14:39:11 +0800
+Subject: [PATCH 5/5] robotic-ai setup and start optimization
+
+---
+ .../workers/robotics-ai/setup.sh              | 45 +++++++++++++++++++
+ .../workers/robotics-ai/start.sh              |  4 +-
+ 2 files changed, 47 insertions(+), 2 deletions(-)
+
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/setup.sh b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/setup.sh
+index 13c8ab0..e7f4aea 100755
+--- a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/setup.sh
++++ b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/setup.sh
+@@ -9,6 +9,7 @@ WORKERS_DIR="$(dirname "$SCRIPT_DIR")"
+ WORKERS_THIRDPARTY_DIR="$WORKERS_DIR/thirdparty"
+ 
+ UV_PATH="$WORKERS_THIRDPARTY_DIR/uv/uv"
++HOME_DIR="$(dirname "$WORKERS_DIR")"
+ 
+ check_uv() {
+     if [ -x "$UV_PATH" ]; then
+@@ -20,10 +21,54 @@ check_uv() {
+     exit 1
+ }
+ 
++prepare_model() {
++    echo "Downloading and exporting models for Robotics AI samples ..."
++    local model_dir="$HOME_DIR/models/multiserve/text-generation/OV/text_generation"
++    local config_dir
++    config_dir=$(dirname "$model_dir")
++
++    cd "$SCRIPT_DIR"
++    if [ ! -d ".export-venv" ]; then
++        "$UV_PATH" venv --python=3.12 .export-venv
++    fi
++
++    # shellcheck source=/dev/null
++    source .export-venv/bin/activate
++
++    cd "$HOME_DIR"
++    "$UV_PATH" pip install -r https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/tags/v2025.4.1/demos/common/export_models/requirements.txt --index-strategy unsafe-best-match
++    mkdir -p "$model_dir"
++    mkdir -p thirdparty/ovms
++    curl https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2025/4/demos/common/export_models/export_model.py -o thirdparty/ovms/export_model.py
++    rm -f "$config_dir/config.json" || true
++    hf download Qwen/Qwen3-4B-Instruct-2507
++    optimum-cli export openvino -m Qwen/Qwen3-4B-Instruct-2507 --weight-format int4 "$model_dir/Qwen/Qwen3-4B-Instruct-2507"
++    python3 thirdparty/ovms/export_model.py text_generation --source_model Qwen/Qwen3-4B-Instruct-2507 --weight-format int4 --pipeline_type LM --enable_prefix_caching --model_name Qwen/Qwen3-4B-Instruct-2507 --config_file_path "$config_dir/config.json" --model_repository_path "$model_dir" --tool_parser hermes3 --cache_size 4 --target_device GPU  --extra_quantization_params "--sym --group-size 128 --ratio 1.0"
++    python3 thirdparty/ovms/export_model.py text_generation --source_model OpenGVLab/InternVL3-2B --weight-format int4 --pipeline_type VLM --enable_prefix_caching --model_name OpenGVLab/InternVL3-2B --config_file_path "$config_dir/config.json" --model_repository_path "$model_dir" --cache_size 4 --target_device GPU
++    cat "$config_dir/config.json"
++    deactivate
++
++    cd "$SCRIPT_DIR"
++    echo "Model preparation completed."
++}
++
++install_runtime_dependencies() {
++    echo "Installing speech-to-text runtime dependencies..."
++
++    # Use uv sync to install dependencies from pyproject.toml
++    # This creates/updates the .venv and installs all dependencies
++    "$UV_PATH" sync
++
++    echo "Runtime dependencies installed."
++    return 0
++}
++
+ main() {
+     echo "Starting Robotics AI setup ..."
+     cd "$SCRIPT_DIR"
+     check_uv
++    prepare_model
++    install_runtime_dependencies
+     echo "Robotics AI setup completed successfully!"
+ }
+ 
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/start.sh b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/start.sh
+index 8be0408..741e8e4 100755
+--- a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/start.sh
++++ b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/start.sh
+@@ -116,8 +116,8 @@ start_ovms_background() {
+ 
+ main() {
+     cd "$SCRIPT_DIR"
+-    prepare_model
+-    install_xpu_smi
++    #prepare_model
++    #install_xpu_smi
+     start_ovms_background
+     "$UV_CMD" run main.py "$@"
+ }
+-- 
+2.43.0
+

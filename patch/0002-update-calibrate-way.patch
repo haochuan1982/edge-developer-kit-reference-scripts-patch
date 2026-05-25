@@ -1,0 +1,229 @@
+From 87f93cd13bd2ebfe610cc7a84e95bea3d0f71a41 Mon Sep 17 00:00:00 2001
+From: Martin Chen <haochuan.z.chen@intel.com>
+Date: Wed, 20 May 2026 10:53:59 +0800
+Subject: [PATCH 2/5] update calibrate way
+
+---
+ .../workers/robotics-ai/main.py               | 137 +++++++++++++++++-
+ .../workers/robotics-ai/utils/platform.py     |   6 +-
+ 2 files changed, 133 insertions(+), 10 deletions(-)
+
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
+index b50fe37..67a24d0 100755
+--- a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
++++ b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
+@@ -831,7 +831,7 @@ async def start_calibration():
+     is positioned correctly above the target pick location, then call
+     POST /robot/calibrate/confirm to complete the calibration sequence.
+     """
+-    global CALIBRATION_STATE, ROBOT_ARM_CLIENT, CONFIG
++    global CALIBRATION_STATE, ROBOT_ARM_CLIENT, CONFIG, OBJECT_DETECTOR
+ 
+     if ROBOT_ARM_CLIENT is None:
+         raise HTTPException(
+@@ -844,9 +844,10 @@ async def start_calibration():
+             "Call POST /robot/calibrate/confirm to finish or reset the state.",
+         )
+ 
+-    offset_x = CONFIG.get("robot", {}).get("offset_x", 0)
+-    offset_y = CONFIG.get("robot", {}).get("offset_y", 0)
+-    offset_z = CONFIG.get("robot", {}).get("offset_z", 0)
++    CONFIG = load_config("config.yaml")
++    offset_x = 0
++    offset_y = 0
++    offset_z = 0
+ 
+     try:
+         await run_blocking(ROBOT_ARM_CLIENT.calibrate_start, offset_x, offset_y, offset_z)
+@@ -867,9 +868,14 @@ async def start_calibration():
+ async def confirm_calibration():
+     """Phase 2: confirm the pick position and cycle through the container pose.
+ 
++    This also performs automatic offset calibration:
++    1. Detects a calibration object placed at the gripper position
++    2. Calculates the offset needed to align arm coordinates with camera coordinates
++    3. Updates offset_x and offset_y in the config
++
+     Equivalent to pressing 'q' in the original calibrate-arm.py script.
+     """
+-    global CALIBRATION_STATE, ROBOT_ARM_CLIENT
++    global CALIBRATION_STATE, ROBOT_ARM_CLIENT, CONFIG, OBJECT_DETECTOR, CAMERA_STREAM
+ 
+     if ROBOT_ARM_CLIENT is None:
+         raise HTTPException(
+@@ -882,6 +888,108 @@ async def confirm_calibration():
+             "Call POST /robot/calibrate/start first.",
+         )
+ 
++    # First, capture the frame and detect the calibration object BEFORE moving the arm
++    color_frame, depth_frame, _ = get_current_frame_for_inference()
++    detection_info = []
++    calibration_successful = False
++    offset_updated = False
++
++    if color_frame is not None and depth_frame is not None:
++        detection_results = await run_blocking(
++            OBJECT_DETECTOR.inference_with_bboxes,
++            source=color_frame,
++            bboxes=[CONFIG["inference"]["bbox"]],
++            debug=False,
++        )
++
++        # Iterate through detection results and log each item's 'box' element
++        for key, result in detection_results.items():
++            box = result.get("box")
++            logger.info(f"Detection result {key}: box = {box}")
++            # Also collect for response (convert to list for JSON serialization)
++            detection_info.append({
++                "key": key,
++                "box": box.tolist() if hasattr(box, 'tolist') else list(box) if box is not None else None
++            })
++
++        # Use the first detected object for calibration
++        if len(detection_results) > 0:
++            first_key = list(detection_results.keys())[0]
++            first_result = detection_results[first_key]
++
++            # Get bounding box coordinates
++            obj_xmin, obj_ymin, obj_xmax, obj_ymax = map(int, first_result["box"])
++
++            # Calculate centroid (use bbox center as fallback)
++            cx = int((obj_xmin + obj_xmax) / 2)
++            cy = int((obj_ymin + obj_ymax) / 2)
++
++            # Try to use mask centroid if available for better accuracy
++            mask = first_result.get("mask")
++            if mask is not None:
++                try:
++                    if hasattr(mask, 'cpu'):
++                        mask = mask.cpu().numpy()
++                    if mask.dtype != np.uint8:
++                        mask = (mask * 255).astype(np.uint8)
++
++                    if np.any(mask):
++                        M = cv2.moments(mask)
++                        if M["m00"] != 0:
++                            cx = int(M["m10"] / M["m00"])
++                            cy = int(M["m01"] / M["m00"])
++                            logger.info(f"Calibration using mask centroid: {cx}, {cy}")
++                except Exception as e:
++                    logger.warning(f"Failed to calculate mask moments for calibration: {e}")
++
++            # Get depth
++            depth = depth_frame.get_distance(cx, cy)
++
++            if depth > 0:
++                # Calculate the object pose in camera coordinates
++                object_pose = calculate_arm_to_obj(
++                    ROBOT_FRAME,
++                    CAMERA_STREAM.depth_intrinsics,
++                    [cx, cy],
++                    depth,
++                )
++
++                if object_pose:
++                    # Convert to meters (same as pickup_object)
++                    detected_x = -object_pose['x'] / 1000.0
++                    detected_y = -object_pose['y'] / 1000.0
++
++                    logger.info(f"Calibration object detected at camera position: x={detected_x:.4f}m, y={detected_y:.4f}m")
++
++                    # The calibration object is at the gripper (home position, since offset_x=0, offset_y=0)
++                    # Camera sees it at detected_x, detected_y
++                    # We want camera (0,0) to align with arm home + new_offset
++                    # So: new_offset = -detected * 1000 (convert back to mm)
++                    new_offset_x = -(detected_x * 1000.0)
++                    new_offset_y = -(detected_y * 1000.0)
++
++                    logger.info(f"Calibration: Calculated offsets: x={new_offset_x:.2f}mm, y={new_offset_y:.2f}mm")
++                    logger.info(f"Calibration: Camera detected object at x={detected_x:.4f}m, y={detected_y:.4f}m from camera origin")
++
++                    # Update config with new offsets
++                    CONFIG.setdefault("robot", {})["offset_x"] = new_offset_x
++                    CONFIG["robot"]["offset_y"] = new_offset_y
++
++                    try:
++                        await run_blocking(save_config, "config.yaml", CONFIG)
++                        offset_updated = True
++                        calibration_successful = True
++                        logger.info("Calibration offsets saved to config.yaml")
++                    except Exception as exc:
++                        logger.exception("Failed to save calibration offsets to config")
++                else:
++                    logger.warning("Could not calculate object pose for calibration")
++            else:
++                logger.warning(f"Invalid depth for calibration object: {depth}")
++        else:
++            logger.warning("No objects detected for calibration. Please place a calibration object at the gripper position.")
++
++    # Now move the arm through the calibration sequence
+     try:
+         await run_blocking(ROBOT_ARM_CLIENT.calibrate_confirm)
+     except Exception as exc:
+@@ -890,10 +998,25 @@ async def confirm_calibration():
+         raise HTTPException(status_code=500, detail=str(exc))
+ 
+     CALIBRATION_STATE = "idle"
++
++    message = "Calibration complete. Arm cycled through container pose and returned home."
++    if offset_updated:
++        message += f"\n✓ Offsets automatically updated: offset_x={CONFIG['robot']['offset_x']:.2f}mm, offset_y={CONFIG['robot']['offset_y']:.2f}mm"
++    else:
++        message += "\n⚠ Could not auto-calculate offsets. Please ensure a calibration object is placed at the gripper position."
++
+     return {
+         "status": True,
+         "state": CALIBRATION_STATE,
+-        "message": "Calibration complete. Arm cycled through container pose and returned home.",
++        "message": message,
++        "detection_count": len(detection_info),
++        "detections": detection_info,
++        "calibration_successful": calibration_successful,
++        "offset_updated": offset_updated,
++        "new_offsets": {
++            "offset_x": CONFIG.get("robot", {}).get("offset_x", 0),
++            "offset_y": CONFIG.get("robot", {}).get("offset_y", 0),
++        } if offset_updated else None,
+     }
+ 
+ 
+@@ -1502,7 +1625,7 @@ async def pickup_object(requested_object: str, ctx: Context) -> str:
+                 # Move to object pose
+                 T_current = await run_blocking(ROBOT_ARM_CLIENT.arm.get_current_ee_pose)
+                 current_pos = T_current[:3, 3]
+-                target_x = current_pos[0] + (target_pose_x) - 0.03
++                target_x = current_pos[0] + (target_pose_x)
+                 target_y = current_pos[1] + (target_pose_y)
+                 target_z = current_pos[2]
+                 await run_blocking(ROBOT_ARM_CLIENT.move_to_coordinate, target_x, target_y, target_z, fixed_wrist_roll)
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/utils/platform.py b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/utils/platform.py
+index 6ff600c..bad97bf 100755
+--- a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/utils/platform.py
++++ b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/utils/platform.py
+@@ -64,7 +64,6 @@ class SO101:
+         offset_z = offset_z_mm / 1000.0
+ 
+         self.arm.move_to_joint_position(self.arm.DEFAULT_LOCATION["home"])
+-        self.arm.open_gripper()
+ 
+         # Apply X/Y offset from home
+         T_current = self.arm.get_current_ee_pose()
+@@ -89,12 +88,13 @@ class SO101:
+             position_weight=20.0,
+             orientation_weight=0.05,
+         )
++        self.arm.open_gripper()
++        self.arm.move_to_joint_position(self.arm.DEFAULT_LOCATION["home"])
++        self.arm.close_gripper()
+ 
+     def calibrate_confirm(self):
+         """Phase 2 of calibration: confirm pick position, cycle through container pose,
+         and return to home. Does NOT disconnect the arm."""
+-        self.arm.close_gripper()
+-        self.arm.move_to_joint_position(self.arm.DEFAULT_LOCATION["home"])
+         self.arm.move_to_joint_position(self.arm.DEFAULT_LOCATION["container"])
+         self.arm.open_gripper()
+         self.arm.close_gripper()
+-- 
+2.43.0
+
