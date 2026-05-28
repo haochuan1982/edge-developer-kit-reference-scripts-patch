@@ -1,15 +1,15 @@
-From beb41df7962a7ff88117d0ad6faa595c434fb051 Mon Sep 17 00:00:00 2001
+From 31c4939585f44ca69f42f87cc4e348682a78bf32 Mon Sep 17 00:00:00 2001
 From: "Martin, Chen" <haochuan.z.chen@intel.com>
 Date: Fri, 22 May 2026 14:39:11 +0800
 Subject: [PATCH 5/5] robotic-ai setup and start optimization
 
 ---
- .../workers/robotics-ai/setup.sh              | 45 +++++++++++++++++++
+ .../workers/robotics-ai/setup.sh              | 49 +++++++++++++++++++
  .../workers/robotics-ai/start.sh              |  4 +-
- 2 files changed, 47 insertions(+), 2 deletions(-)
+ 2 files changed, 51 insertions(+), 2 deletions(-)
 
 diff --git a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/setup.sh b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/setup.sh
-index 13c8ab0..e7f4aea 100755
+index 13c8ab0..ca4a9d3 100755
 --- a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/setup.sh
 +++ b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/setup.sh
 @@ -9,6 +9,7 @@ WORKERS_DIR="$(dirname "$SCRIPT_DIR")"
@@ -20,7 +20,7 @@ index 13c8ab0..e7f4aea 100755
  
  check_uv() {
      if [ -x "$UV_PATH" ]; then
-@@ -20,10 +21,54 @@ check_uv() {
+@@ -20,10 +21,58 @@ check_uv() {
      exit 1
  }
  
@@ -52,6 +52,10 @@ index 13c8ab0..e7f4aea 100755
 +    deactivate
 +
 +    cd "$SCRIPT_DIR"
++
++    mkdir -p models/FastSAM-x/
++    curl -# -L https://github.com/ultralytics/assets/releases/download/v8.4.0/FastSAM-x.pt -o models/FastSAM-x/FastSAM-x.pt
++
 +    echo "Model preparation completed."
 +}
 +
