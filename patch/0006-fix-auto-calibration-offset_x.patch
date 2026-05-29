@@ -1,0 +1,25 @@
+From 9b482421fd17500146c9070c18a7d04af865bb86 Mon Sep 17 00:00:00 2001
+From: Martin Chen <haochuan.z.chen@intel.com>
+Date: Fri, 29 May 2026 15:14:45 +0800
+Subject: [PATCH 6/6] fix auto calibration offset_x
+
+---
+ usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
+index 0618aad..06d9640 100755
+--- a/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
++++ b/usecases/ai/edge-ai-demo-studio/workers/robotics-ai/main.py
+@@ -847,7 +847,7 @@ async def start_calibration():
+     CONFIG = load_config("config.yaml")
+     offset_x = 0
+     offset_y = 0
+-    offset_z = 0
++    offset_z = CONFIG["robot"]["offset_z"]
+ 
+     try:
+         await run_blocking(ROBOT_ARM_CLIENT.calibrate_start, offset_x, offset_y, offset_z)
+-- 
+2.43.0
+
