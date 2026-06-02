@@ -84,6 +84,13 @@ Now you're ready to control the robot! Use the AI Chat Assistant to command the 
 
 ## Tips
 
+### If you get Docker image by sharing, concat by this command
+
+```bash
+$ cat robotic-ai-20260529.tar.0* > robotic-ai-20260529.tar
+$ docker load -i robotic-ai-20260529.tar
+```
+
 ### If you want to build the Docker image
 
 ```bash
@@ -92,5 +99,6 @@ $ cd edge-developer-kit-reference-scripts-patch
 $ git submodule update --init edge-developer-kit-reference-scripts
 $ cd edge-developer-kit-reference-scripts
 $ git am ../patch/*.patch
+$ cd ..
 $ docker build -t robotic-ai .
 ```
