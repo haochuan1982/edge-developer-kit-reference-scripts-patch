@@ -50,19 +50,19 @@ $ docker run -it --rm \
 
 Navigate to http://localhost:8080 to access the dashboard.
 
-<img src="image/dashboard.png" width="70%">
+![Dashboard](image/dashboard.png)
 
 ### 4. Start the Robotics AI sample
 
 Once the dashboard loads, navigate to the "Samples" section in the sidebar and select "Robotics AI". Click the "Start Required" button to initialize and launch the robotics AI application. Wait for the service to start up, then click the "Launch Demo" button to open the robotics AI demo interface.
 
-<img src="image/launch-demo.png" width="70%">
+![Launch Demo](image/launch-demo.png)
 
 ### 5. Configure and test the robot
 
 In the Robotics AI interface, select robot type "SO-ARM101" from the robot selection dropdown. Click the "Reload Camera" button to initialize the camera feed. To verify that everything is working correctly, test the AI Chat Assistant by saying "Hello" and confirm you receive a response.
 
-<img src="image/hello.png" width="70%">
+![Hello Demo](image/hello.png)
 
 ### 6. Calibrate the robot (First-time setup only)
 
@@ -81,7 +81,7 @@ For first-time setup, you need to calibrate the LeRobot arm. Follow these steps:
 
 After completing the arm calibration, proceed with camera calibration. Click the "Start Detection" button and ensure that the plate and red block are both positioned in the center of the camera preview window.
 
-<img src="image/camera-calibration.png" width="70%">
+![Camera Calibration](image/camera-calibration.png)
 
 ### 8. Calibrate home position offset
 
@@ -93,15 +93,15 @@ Before the arm can complete pick and place tasks, you need to calibrate the arm'
 
 2. Set x, y offset to 0 and click "Save Offset Config".
 
-<img src="image/initial.png" width="35%">
+![Initial](image/initial.png)
 
 3. The brick will be placed in the home position. Ensure the home position is inside the red block.
 
-<img src="image/home.png" width="35%">
+<img src="image/home.png" width="70%">
 
 4. After clicking "Confirmation", the home position's offset x, y will be calculated.
 
-<img src="image/detection.png" width="35%">
+![Detection](image/detection.png)
 
 5. Fine-tune the offset x, y, z values through pick and place testing.
 
@@ -115,7 +115,7 @@ Now you're ready to control the robot! Use the AI Chat Assistant to command the 
 
 During deployment, if any issues occur, you can check the printed logs.
 
-<img src="image/log.png" width="70%">
+![Log](image/log.png)
 
 ### If you receive the Docker image via file sharing, concatenate it with this command
 
