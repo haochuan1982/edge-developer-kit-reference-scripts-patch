@@ -10,6 +10,7 @@
 
 ```bash
 $ ls /dev/ttyACM0
+$ ls /dev/video*
 ```
 
 ### 1. Pull Docker image
@@ -25,25 +26,7 @@ $ git clone https://github.com/haochuan1982/edge-developer-kit-reference-scripts
 $ cd edge-developer-kit-reference-scripts-patch
 $ export ROBOT_AI_DIR=/opt/edge-developer-kit-reference-scripts/usecases/ai/edge-ai-demo-studio/workers/robotics-ai
 
-$ docker run -it --rm \
-  --device /dev/dri/card1 \
-  --device /dev/dri/renderD128 \
-  --device /dev/video0 \
-  --device /dev/video1 \
-  --device /dev/video2 \
-  --device /dev/video3 \
-  --device /dev/video4 \
-  --device /dev/video5 \
-  --device /dev/accel/accel0 \
-  --device /dev/ttyACM0 \
-  --group-add video \
-  --group-add render \
-  --group-add plugdev \
-  -v $PWD/calibration:/root/.cache/huggingface/lerobot/calibration \
-  -v $PWD/config.yaml:$ROBOT_AI_DIR/config.yaml \
-  -p 8080:8080 \
-  chenhaochuan82/robotic-ai:latest \
-  bash -c "start.sh"
+$ ./launch.sh
 ```
 
 ### 3. Open your browser
